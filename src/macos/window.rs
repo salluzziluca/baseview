@@ -1,7 +1,6 @@
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::ffi::c_void;
-use std::ptr;
 use std::rc::Rc;
 
 use cocoa::appkit::{
@@ -18,8 +17,9 @@ use objc::class;
 use objc::{msg_send, runtime::Object, sel, sel_impl};
 use raw_window_handle::{
     AppKitDisplayHandle, AppKitWindowHandle, HasDisplayHandle, HasWindowHandle,
-    RawDisplayHandle, RawWindowHandle, HandleError,
+    RawWindowHandle, RawDisplayHandle, HandleError,
 };
+use std::ptr::NonNull;
 
 use crate::{
     Event, EventStatus, MouseCursor, Size, WindowHandler, WindowInfo, WindowOpenOptions,
@@ -109,16 +109,14 @@ impl WindowInner {
 
     fn window_handle(&self) -> Result<raw_window_handle::WindowHandle<'_>, HandleError> {
         if self.open.get() {
-            let ns_window = self.ns_window.get().unwrap_or(ptr::null_mut()) as *mut c_void;
+            let ns_view = NonNull::new(self.ns_view as *mut c_void);
+            let handle = AppKitWindowHandle::new(ns_view.unwrap_or(NonNull::dangling()));
 
-            let mut handle = AppKitWindowHandle::empty();
-            handle.ns_window = ns_window;
-            handle.ns_view = self.ns_view as *mut c_void;
-
-            return Ok(raw_window_handle::WindowHandle::AppKit(handle));
+            return unsafe { Ok(raw_window_handle::WindowHandle::borrow_raw(RawWindowHandle::AppKit(handle))) };
         }
 
-        Ok(raw_window_handle::WindowHandle::AppKit(AppKitWindowHandle::empty()))
+        let handle = AppKitWindowHandle::new(NonNull::dangling());
+        unsafe { Ok(raw_window_handle::WindowHandle::borrow_raw(RawWindowHandle::AppKit(handle))) }
     }
 }
 
@@ -129,7 +127,7 @@ pub struct Window<'a> {
 impl<'a> Window<'a> {
     pub fn open_parented<P, H, B>(parent: &P, options: WindowOpenOptions, build: B) -> WindowHandle
     where
-        P: HasRawWindowHandle,
+        P: HasWindowHandle,
         H: WindowHandler + 'static,
         B: FnOnce(&mut crate::Window) -> H,
         B: Send + 'static,
@@ -143,13 +141,29 @@ impl<'a> Window<'a> {
 
         let window_info = WindowInfo::from_logical_size(options.size, scaling);
 
-        let handle = if let RawWindowHandle::AppKit(handle) = parent.raw_window_handle() {
-            handle
-        } else {
-            panic!("Not a macOS window");
+        let handle = match parent.window_handle() {
+            Ok(window_handle) => match window_handle.as_raw() {
+                RawWindowHandle::AppKit(handle) => handle,
+                h => panic!("unsupported parent handle type {:?}", h),
+            },
+            Err(e) => panic!("failed to get parent window handle: {:?}", e),
         };
 
         let ns_view = unsafe { create_view(&options) };
+        
+        // Position the child view with some offset so it's clearly visible
+        unsafe {
+            let child_frame = NSRect::new(
+                NSPoint::new(50.0, 50.0), // Offset from parent's origin
+                NSSize::new(options.size.width, options.size.height)
+            );
+            let _: () = msg_send![ns_view, setFrame: child_frame];
+            
+            // Set a visible background color for debugging
+            let red_color: id = msg_send![class!(NSColor), redColor];
+            let _: () = msg_send![ns_view, setBackgroundColor: red_color];
+            let _: () = msg_send![ns_view, setWantsLayer: YES];
+        }
 
         let window_inner = WindowInner {
             open: Cell::new(true),
@@ -166,7 +180,21 @@ impl<'a> Window<'a> {
         let window_handle = Self::init(window_inner, window_info, build);
 
         unsafe {
-            let _: id = msg_send![handle.ns_view as *mut Object, addSubview: ns_view];
+            // Add the child view as a subview AFTER the parent has been fully initialized
+            let _: () = msg_send![handle.ns_view.as_ptr() as *mut Object, addSubview: ns_view];
+            
+            // Configure the view to be visible with a layer that's above everything else
+            let _: () = msg_send![ns_view, setHidden: NO];
+            let _: () = msg_send![ns_view, setWantsLayer: YES];
+            
+            // Get the layer and configure it
+            let layer: id = msg_send![ns_view, layer];
+            let _: () = msg_send![layer, setZPosition: 1000.0]; // Put it way above other content
+            let _: () = msg_send![layer, setOpaque: YES];
+            
+            // Force display updates
+            let _: () = msg_send![ns_view, setNeedsDisplay: YES];
+            let _: () = msg_send![handle.ns_view.as_ptr() as *mut Object, setNeedsDisplay: YES];
 
             let () = msg_send![pool, drain];
         }
@@ -345,9 +373,8 @@ impl<'a> Window<'a> {
 
     #[cfg(feature = "opengl")]
     fn create_gl_context(ns_window: Option<id>, ns_view: id, config: GlConfig) -> GlContext {
-        let mut handle = AppKitWindowHandle::empty();
-        handle.ns_window = ns_window.unwrap_or(ptr::null_mut()) as *mut c_void;
-        handle.ns_view = ns_view as *mut c_void;
+        let ns_view_non_null = NonNull::new(ns_view as *mut c_void).unwrap_or(NonNull::dangling());
+        let handle = AppKitWindowHandle::new(ns_view_non_null);
         let handle = RawWindowHandle::AppKit(handle);
 
         unsafe { GlContext::create(&handle, config).expect("Could not create OpenGL context") }
@@ -465,7 +492,8 @@ impl<'a> HasWindowHandle for Window<'a> {
 
 impl<'a> HasDisplayHandle for Window<'a> {
     fn display_handle(&self) -> Result<raw_window_handle::DisplayHandle<'_>, HandleError> {
-        Ok(raw_window_handle::DisplayHandle::AppKit(AppKitDisplayHandle::empty()))
+        let handle = AppKitDisplayHandle::new();
+        unsafe { Ok(raw_window_handle::DisplayHandle::borrow_raw(RawDisplayHandle::AppKit(handle))) }
     }
 }
 
