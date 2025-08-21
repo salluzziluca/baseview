@@ -17,7 +17,7 @@ enum Message {
 struct OpenWindowExample {
     rx: Consumer<Message>,
     current_size: PhySize,
-    damaged: bool,
+    frame_count: u32,
 }
 
 impl WindowHandler for OpenWindowExample {
@@ -32,11 +32,36 @@ impl WindowHandler for OpenWindowExample {
             surface.resize(width, height).expect("Failed to resize surface");
             
             let mut buf = surface.buffer_mut().expect("Failed to get buffer");
-            if self.damaged {
-                buf.fill(0xFFAAAAAA);
-                self.damaged = false;
+            
+            // Use the correct softbuffer format: 0RGB (highest 8 bits must be 0)
+            // Format: 00000000RRRRRRRRGGGGGGGGBBBBBBBB
+            let colors = [
+                0x00FF0000, // Red
+                0x0000FF00, // Green  
+                0x000000FF, // Blue
+                0x00FFFF00, // Yellow
+                0x00FF00FF, // Magenta
+                0x0000FFFF, // Cyan
+                0x00FFFFFF, // White
+                0x00808080, // Gray
+            ];
+            
+            let color = colors[(self.frame_count / 60) as usize % colors.len()];
+            
+            // Debug: Print current color and buffer info
+            println!("Frame {}: Using color 0x{:08X}, buffer size: {}", 
+                     self.frame_count, color, buf.len());
+            
+            // Fill the entire buffer with a solid color - no pattern, no transparency
+            buf.fill(color);
+            
+            // Double-check: manually set every pixel to make sure
+            for pixel in buf.iter_mut() {
+                *pixel = color;
             }
+            
             buf.present().expect("Failed to present buffer");
+            self.frame_count += 1;
         }
 
         while let Ok(message) = self.rx.pop() {
@@ -52,7 +77,6 @@ impl WindowHandler for OpenWindowExample {
                 println!("Resized: {:?}", info);
                 let new_size = info.physical_size();
                 self.current_size = new_size;
-                self.damaged = true;
             }
             _ => {}
         }
@@ -88,7 +112,7 @@ fn main() {
         OpenWindowExample {
             rx,
             current_size: PhySize::new(512, 512),
-            damaged: true,
+            frame_count: 0,
         }
     });
 }

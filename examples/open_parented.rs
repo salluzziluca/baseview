@@ -6,7 +6,6 @@ use std::num::NonZeroU32;
 
 struct ParentWindowHandler {
     current_size: PhySize,
-    damaged: bool,
     _child_window: Option<WindowHandle>,
 }
 
@@ -27,7 +26,6 @@ impl ParentWindowHandler {
         // TODO: no way to query physical size initially?
         Self {
             current_size: PhySize::new(512, 512),
-            damaged: true,
             _child_window: Some(child_window),
         }
     }
@@ -45,10 +43,10 @@ impl WindowHandler for ParentWindowHandler {
             surface.resize(width, height).expect("Failed to resize surface");
             
             let mut buf = surface.buffer_mut().expect("Failed to get buffer");
-            if self.damaged {
-                buf.fill(0xFFAAAAAA);
-                self.damaged = false;
-            }
+            
+            // Always fill parent window with blue color
+            buf.fill(0x000000FF); // Pure blue
+            
             buf.present().expect("Failed to present buffer");
         }
     }
@@ -59,7 +57,6 @@ impl WindowHandler for ParentWindowHandler {
                 println!("Parent Resized: {:?}", info);
                 let new_size = info.physical_size();
                 self.current_size = new_size;
-                self.damaged = true;
             }
             Event::Mouse(e) => println!("Parent Mouse event: {:?}", e),
             Event::Keyboard(e) => println!("Parent Keyboard event: {:?}", e),
@@ -72,13 +69,12 @@ impl WindowHandler for ParentWindowHandler {
 
 struct ChildWindowHandler {
     current_size: PhySize,
-    damaged: bool,
 }
 
 impl ChildWindowHandler {
     pub fn new(_window: &mut Window) -> Self {
         // TODO: no way to query physical size initially?
-        Self { current_size: PhySize::new(256, 256), damaged: true }
+        Self { current_size: PhySize::new(256, 256) }
     }
 }
 
@@ -94,10 +90,10 @@ impl WindowHandler for ChildWindowHandler {
             surface.resize(width, height).expect("Failed to resize surface");
             
             let mut buf = surface.buffer_mut().expect("Failed to get buffer");
-            if self.damaged {
-                buf.fill(0xFFAA0000);
-                self.damaged = false;
-            }
+            
+            // Always fill child window with green color
+            buf.fill(0x0000FF00); // Pure green
+            
             buf.present().expect("Failed to present buffer");
         }
     }
@@ -108,7 +104,6 @@ impl WindowHandler for ChildWindowHandler {
                 println!("Child Resized: {:?}", info);
                 let new_size = info.physical_size();
                 self.current_size = new_size;
-                self.damaged = true;
             }
             Event::Mouse(e) => println!("Child Mouse event: {:?}", e),
             Event::Keyboard(e) => println!("Child Keyboard event: {:?}", e),
