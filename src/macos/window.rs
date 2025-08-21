@@ -372,7 +372,7 @@ impl<'a> Window<'a> {
     }
 
     #[cfg(feature = "opengl")]
-    fn create_gl_context(ns_window: Option<id>, ns_view: id, config: GlConfig) -> GlContext {
+    fn create_gl_context(_ns_window: Option<id>, ns_view: id, config: GlConfig) -> GlContext {
         let ns_view_non_null = NonNull::new(ns_view as *mut c_void).unwrap_or(NonNull::dangling());
         let handle = AppKitWindowHandle::new(ns_view_non_null);
         let handle = RawWindowHandle::AppKit(handle);
