@@ -16,21 +16,28 @@ enum Message {
 
 struct OpenWindowExample {
     rx: Consumer<Message>,
-
-    _ctx: softbuffer::Context,
-    surface: softbuffer::Surface,
     current_size: PhySize,
     damaged: bool,
 }
 
 impl WindowHandler for OpenWindowExample {
-    fn on_frame(&mut self, _window: &mut Window) {
-        let mut buf = self.surface.buffer_mut().unwrap();
-        if self.damaged {
-            buf.fill(0xFFAAAAAA);
-            self.damaged = false;
+    fn on_frame(&mut self, window: &mut Window) {
+        // Create softbuffer objects locally for each frame - this avoids lifetime issues
+        let ctx = softbuffer::Context::new(&*window).expect("Failed to create softbuffer context");
+        let mut surface = softbuffer::Surface::new(&ctx, &*window).expect("Failed to create softbuffer surface");
+        
+        if let (Some(width), Some(height)) = 
+            (NonZeroU32::new(self.current_size.width), NonZeroU32::new(self.current_size.height))
+        {
+            surface.resize(width, height).expect("Failed to resize surface");
+            
+            let mut buf = surface.buffer_mut().expect("Failed to get buffer");
+            if self.damaged {
+                buf.fill(0xFFAAAAAA);
+                self.damaged = false;
+            }
+            buf.present().expect("Failed to present buffer");
         }
-        buf.present().unwrap();
 
         while let Ok(message) = self.rx.pop() {
             println!("Message: {:?}", message);
@@ -45,13 +52,7 @@ impl WindowHandler for OpenWindowExample {
                 println!("Resized: {:?}", info);
                 let new_size = info.physical_size();
                 self.current_size = new_size;
-
-                if let (Some(width), Some(height)) =
-                    (NonZeroU32::new(new_size.width), NonZeroU32::new(new_size.height))
-                {
-                    self.surface.resize(width, height).unwrap();
-                    self.damaged = true;
-                }
+                self.damaged = true;
             }
             _ => {}
         }
@@ -83,14 +84,8 @@ fn main() {
         }
     });
 
-    Window::open_blocking(window_open_options, |window| {
-        let ctx = unsafe { softbuffer::Context::new(window) }.unwrap();
-        let mut surface = unsafe { softbuffer::Surface::new(&ctx, window) }.unwrap();
-        surface.resize(NonZeroU32::new(512).unwrap(), NonZeroU32::new(512).unwrap()).unwrap();
-
+    Window::open_blocking(window_open_options, |_window| {
         OpenWindowExample {
-            _ctx: ctx,
-            surface,
             rx,
             current_size: PhySize::new(512, 512),
             damaged: true,

@@ -5,20 +5,13 @@ use baseview::{
 use std::num::NonZeroU32;
 
 struct ParentWindowHandler {
-    _ctx: softbuffer::Context,
-    surface: softbuffer::Surface,
     current_size: PhySize,
     damaged: bool,
-
     _child_window: Option<WindowHandle>,
 }
 
 impl ParentWindowHandler {
     pub fn new(window: &mut Window) -> Self {
-        let ctx = unsafe { softbuffer::Context::new(window) }.unwrap();
-        let mut surface = unsafe { softbuffer::Surface::new(&ctx, window) }.unwrap();
-        surface.resize(NonZeroU32::new(512).unwrap(), NonZeroU32::new(512).unwrap()).unwrap();
-
         let window_open_options = baseview::WindowOpenOptions {
             title: "baseview child".into(),
             size: baseview::Size::new(256.0, 256.0),
@@ -33,8 +26,6 @@ impl ParentWindowHandler {
 
         // TODO: no way to query physical size initially?
         Self {
-            _ctx: ctx,
-            surface,
             current_size: PhySize::new(512, 512),
             damaged: true,
             _child_window: Some(child_window),
@@ -43,13 +34,23 @@ impl ParentWindowHandler {
 }
 
 impl WindowHandler for ParentWindowHandler {
-    fn on_frame(&mut self, _window: &mut Window) {
-        let mut buf = self.surface.buffer_mut().unwrap();
-        if self.damaged {
-            buf.fill(0xFFAAAAAA);
-            self.damaged = false;
+    fn on_frame(&mut self, window: &mut Window) {
+        // Create softbuffer objects locally for each frame
+        let ctx = softbuffer::Context::new(&*window).expect("Failed to create softbuffer context");
+        let mut surface = softbuffer::Surface::new(&ctx, &*window).expect("Failed to create softbuffer surface");
+        
+        if let (Some(width), Some(height)) = 
+            (NonZeroU32::new(self.current_size.width), NonZeroU32::new(self.current_size.height))
+        {
+            surface.resize(width, height).expect("Failed to resize surface");
+            
+            let mut buf = surface.buffer_mut().expect("Failed to get buffer");
+            if self.damaged {
+                buf.fill(0xFFAAAAAA);
+                self.damaged = false;
+            }
+            buf.present().expect("Failed to present buffer");
         }
-        buf.present().unwrap();
     }
 
     fn on_event(&mut self, _window: &mut Window, event: Event) -> EventStatus {
@@ -58,13 +59,7 @@ impl WindowHandler for ParentWindowHandler {
                 println!("Parent Resized: {:?}", info);
                 let new_size = info.physical_size();
                 self.current_size = new_size;
-
-                if let (Some(width), Some(height)) =
-                    (NonZeroU32::new(new_size.width), NonZeroU32::new(new_size.height))
-                {
-                    self.surface.resize(width, height).unwrap();
-                    self.damaged = true;
-                }
+                self.damaged = true;
             }
             Event::Mouse(e) => println!("Parent Mouse event: {:?}", e),
             Event::Keyboard(e) => println!("Parent Keyboard event: {:?}", e),
@@ -76,31 +71,35 @@ impl WindowHandler for ParentWindowHandler {
 }
 
 struct ChildWindowHandler {
-    _ctx: softbuffer::Context,
-    surface: softbuffer::Surface,
     current_size: PhySize,
     damaged: bool,
 }
 
 impl ChildWindowHandler {
-    pub fn new(window: &mut Window) -> Self {
-        let ctx = unsafe { softbuffer::Context::new(window) }.unwrap();
-        let mut surface = unsafe { softbuffer::Surface::new(&ctx, window) }.unwrap();
-        surface.resize(NonZeroU32::new(512).unwrap(), NonZeroU32::new(512).unwrap()).unwrap();
-
+    pub fn new(_window: &mut Window) -> Self {
         // TODO: no way to query physical size initially?
-        Self { _ctx: ctx, surface, current_size: PhySize::new(256, 256), damaged: true }
+        Self { current_size: PhySize::new(256, 256), damaged: true }
     }
 }
 
 impl WindowHandler for ChildWindowHandler {
-    fn on_frame(&mut self, _window: &mut Window) {
-        let mut buf = self.surface.buffer_mut().unwrap();
-        if self.damaged {
-            buf.fill(0xFFAA0000);
-            self.damaged = false;
+    fn on_frame(&mut self, window: &mut Window) {
+        // Create softbuffer objects locally for each frame
+        let ctx = softbuffer::Context::new(&*window).expect("Failed to create softbuffer context");
+        let mut surface = softbuffer::Surface::new(&ctx, &*window).expect("Failed to create softbuffer surface");
+        
+        if let (Some(width), Some(height)) = 
+            (NonZeroU32::new(self.current_size.width), NonZeroU32::new(self.current_size.height))
+        {
+            surface.resize(width, height).expect("Failed to resize surface");
+            
+            let mut buf = surface.buffer_mut().expect("Failed to get buffer");
+            if self.damaged {
+                buf.fill(0xFFAA0000);
+                self.damaged = false;
+            }
+            buf.present().expect("Failed to present buffer");
         }
-        buf.present().unwrap();
     }
 
     fn on_event(&mut self, _window: &mut Window, event: Event) -> EventStatus {
@@ -109,13 +108,7 @@ impl WindowHandler for ChildWindowHandler {
                 println!("Child Resized: {:?}", info);
                 let new_size = info.physical_size();
                 self.current_size = new_size;
-
-                if let (Some(width), Some(height)) =
-                    (NonZeroU32::new(new_size.width), NonZeroU32::new(new_size.height))
-                {
-                    self.surface.resize(width, height).unwrap();
-                    self.damaged = true;
-                }
+                self.damaged = true;
             }
             Event::Mouse(e) => println!("Child Mouse event: {:?}", e),
             Event::Keyboard(e) => println!("Child Keyboard event: {:?}", e),

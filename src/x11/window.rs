@@ -1,14 +1,15 @@
 use std::cell::Cell;
 use std::error::Error;
 use std::ffi::c_void;
+
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
 
 use raw_window_handle::{
-    HasRawDisplayHandle, HasRawWindowHandle, RawDisplayHandle, RawWindowHandle, XlibDisplayHandle,
-    XlibWindowHandle,
+    HasDisplayHandle, HasWindowHandle, XlibDisplayHandle, XlibWindowHandle, HandleError,
+    RawWindowHandle, RawDisplayHandle,
 };
 
 use x11rb::connection::Connection;
@@ -30,7 +31,7 @@ use crate::x11::event_loop::EventLoop;
 use crate::x11::visual_info::WindowVisualConfig;
 
 pub struct WindowHandle {
-    raw_window_handle: Option<RawWindowHandle>,
+    raw_window_handle: Option<raw_window_handle::WindowHandle<'static>>,
     close_requested: Arc<AtomicBool>,
     is_open: Arc<AtomicBool>,
 }
@@ -51,15 +52,15 @@ impl WindowHandle {
     }
 }
 
-unsafe impl HasRawWindowHandle for WindowHandle {
-    fn raw_window_handle(&self) -> RawWindowHandle {
+impl HasWindowHandle for WindowHandle {
+    fn window_handle(&self) -> Result<raw_window_handle::WindowHandle<'_>, HandleError> {
         if let Some(raw_window_handle) = self.raw_window_handle {
             if self.is_open.load(Ordering::Relaxed) {
-                return raw_window_handle;
+                return Ok(raw_window_handle);
             }
         }
 
-        RawWindowHandle::Xlib(XlibWindowHandle::empty())
+        unsafe { Ok(raw_window_handle::WindowHandle::borrow_raw(RawWindowHandle::Xlib(XlibWindowHandle::new(0)))) }
     }
 }
 
@@ -120,15 +121,15 @@ type WindowOpenResult = Result<SendableRwh, ()>;
 impl<'a> Window<'a> {
     pub fn open_parented<P, H, B>(parent: &P, options: WindowOpenOptions, build: B) -> WindowHandle
     where
-        P: HasRawWindowHandle,
+        P: HasWindowHandle,
         H: WindowHandler + 'static,
         B: FnOnce(&mut crate::Window) -> H,
         B: Send + 'static,
     {
         // Convert parent into something that X understands
-        let parent_id = match parent.raw_window_handle() {
+        let parent_id = match parent.window_handle().unwrap().as_raw() {
             RawWindowHandle::Xlib(h) => h.window as u32,
-            RawWindowHandle::Xcb(h) => h.window,
+            RawWindowHandle::Xcb(h) => h.window.get(),
             h => panic!("unsupported parent handle type {:?}", h),
         };
 
@@ -142,7 +143,7 @@ impl<'a> Window<'a> {
         });
 
         let raw_window_handle = rx.recv().unwrap().unwrap();
-        window_handle.raw_window_handle = Some(raw_window_handle.0);
+        window_handle.raw_window_handle = Some(unsafe { raw_window_handle::WindowHandle::borrow_raw(raw_window_handle.0) });
 
         window_handle
     }
@@ -292,7 +293,7 @@ impl<'a> Window<'a> {
         // the correct dpi scaling.
         handler.on_event(&mut window, Event::Window(WindowEvent::Resized(window_info)));
 
-        let _ = tx.send(Ok(SendableRwh(window.raw_window_handle())));
+        let _ = tx.send(Ok(SendableRwh(window.window_handle().unwrap().as_raw())));
 
         EventLoop::new(inner, handler, parent_handle).run()?;
 
@@ -351,26 +352,24 @@ impl<'a> Window<'a> {
     }
 }
 
-unsafe impl<'a> HasRawWindowHandle for Window<'a> {
-    fn raw_window_handle(&self) -> RawWindowHandle {
-        let mut handle = XlibWindowHandle::empty();
-
-        handle.window = self.inner.window_id.into();
+impl<'a> HasWindowHandle for Window<'a> {
+    fn window_handle(&self) -> Result<raw_window_handle::WindowHandle<'_>, HandleError> {
+        let mut handle = XlibWindowHandle::new(self.inner.window_id.into());
         handle.visual_id = self.inner.visual_id.into();
 
-        RawWindowHandle::Xlib(handle)
+        unsafe { Ok(raw_window_handle::WindowHandle::borrow_raw(RawWindowHandle::Xlib(handle))) }
     }
 }
 
-unsafe impl<'a> HasRawDisplayHandle for Window<'a> {
-    fn raw_display_handle(&self) -> RawDisplayHandle {
+impl<'a> HasDisplayHandle for Window<'a> {
+    fn display_handle(&self) -> Result<raw_window_handle::DisplayHandle<'_>, HandleError> {
         let display = self.inner.xcb_connection.dpy;
-        let mut handle = XlibDisplayHandle::empty();
+        let handle = XlibDisplayHandle::new(
+            if display.is_null() { None } else { Some(std::ptr::NonNull::new(display as *mut c_void).unwrap()) },
+            unsafe { x11::xlib::XDefaultScreen(display) }
+        );
 
-        handle.display = display as *mut c_void;
-        handle.screen = unsafe { x11::xlib::XDefaultScreen(display) };
-
-        RawDisplayHandle::Xlib(handle)
+        unsafe { Ok(raw_window_handle::DisplayHandle::borrow_raw(RawDisplayHandle::Xlib(handle))) }
     }
 }
 

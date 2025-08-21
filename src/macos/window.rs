@@ -17,8 +17,8 @@ use keyboard_types::KeyboardEvent;
 use objc::class;
 use objc::{msg_send, runtime::Object, sel, sel_impl};
 use raw_window_handle::{
-    AppKitDisplayHandle, AppKitWindowHandle, HasRawDisplayHandle, HasRawWindowHandle,
-    RawDisplayHandle, RawWindowHandle,
+    AppKitDisplayHandle, AppKitWindowHandle, HasDisplayHandle, HasWindowHandle,
+    RawDisplayHandle, RawWindowHandle, HandleError,
 };
 
 use crate::{
@@ -46,9 +46,9 @@ impl WindowHandle {
     }
 }
 
-unsafe impl HasRawWindowHandle for WindowHandle {
-    fn raw_window_handle(&self) -> RawWindowHandle {
-        self.state.window_inner.raw_window_handle()
+impl HasWindowHandle for WindowHandle {
+    fn window_handle(&self) -> Result<raw_window_handle::WindowHandle<'_>, HandleError> {
+        Ok(self.state.window_inner.window_handle()?)
     }
 }
 
@@ -107,7 +107,7 @@ impl WindowInner {
         }
     }
 
-    fn raw_window_handle(&self) -> RawWindowHandle {
+    fn window_handle(&self) -> Result<raw_window_handle::WindowHandle<'_>, HandleError> {
         if self.open.get() {
             let ns_window = self.ns_window.get().unwrap_or(ptr::null_mut()) as *mut c_void;
 
@@ -115,10 +115,10 @@ impl WindowInner {
             handle.ns_window = ns_window;
             handle.ns_view = self.ns_view as *mut c_void;
 
-            return RawWindowHandle::AppKit(handle);
+            return Ok(raw_window_handle::WindowHandle::AppKit(handle));
         }
 
-        RawWindowHandle::AppKit(AppKitWindowHandle::empty())
+        Ok(raw_window_handle::WindowHandle::AppKit(AppKitWindowHandle::empty()))
     }
 }
 
@@ -457,15 +457,15 @@ impl WindowState {
     }
 }
 
-unsafe impl<'a> HasRawWindowHandle for Window<'a> {
-    fn raw_window_handle(&self) -> RawWindowHandle {
-        self.inner.raw_window_handle()
+impl<'a> HasWindowHandle for Window<'a> {
+    fn window_handle(&self) -> Result<raw_window_handle::WindowHandle<'_>, HandleError> {
+        Ok(self.inner.window_handle()?)
     }
 }
 
-unsafe impl<'a> HasRawDisplayHandle for Window<'a> {
-    fn raw_display_handle(&self) -> RawDisplayHandle {
-        RawDisplayHandle::AppKit(AppKitDisplayHandle::empty())
+impl<'a> HasDisplayHandle for Window<'a> {
+    fn display_handle(&self) -> Result<raw_window_handle::DisplayHandle<'_>, HandleError> {
+        Ok(raw_window_handle::DisplayHandle::AppKit(AppKitDisplayHandle::empty()))
     }
 }
 

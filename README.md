@@ -25,8 +25,14 @@ Below is a proposed list of milestones (roughly in-order) and their status. Subj
 
 Install dependencies, e.g.:
 
+**Ubuntu/Debian:**
 ```sh
 sudo apt-get install libx11-dev libxcb1-dev libx11-xcb-dev libgl1-mesa-dev
+```
+
+**Fedora:**
+```sh
+sudo dnf install libX11-devel libxcb-devel libX11-xcb mesa-libGL-devel
 ```
 
 ## License

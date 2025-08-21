@@ -27,8 +27,8 @@ use std::ptr::null_mut;
 use std::rc::Rc;
 
 use raw_window_handle::{
-    HasRawDisplayHandle, HasRawWindowHandle, RawDisplayHandle, RawWindowHandle, Win32WindowHandle,
-    WindowsDisplayHandle,
+    HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle, Win32WindowHandle,
+    WindowsDisplayHandle, HandleError,
 };
 
 const BV_WINDOW_MUST_CLOSE: UINT = WM_USER + 1;
@@ -85,15 +85,15 @@ impl WindowHandle {
     }
 }
 
-unsafe impl HasRawWindowHandle for WindowHandle {
-    fn raw_window_handle(&self) -> RawWindowHandle {
+impl HasWindowHandle for WindowHandle {
+    fn window_handle(&self) -> Result<raw_window_handle::WindowHandle<'_>, HandleError> {
         if let Some(hwnd) = self.hwnd {
             let mut handle = Win32WindowHandle::empty();
             handle.hwnd = hwnd as *mut c_void;
 
-            RawWindowHandle::Win32(handle)
+            Ok(raw_window_handle::WindowHandle::Win32(handle))
         } else {
-            RawWindowHandle::Win32(Win32WindowHandle::empty())
+            Ok(raw_window_handle::WindowHandle::Win32(Win32WindowHandle::empty()))
         }
     }
 }
@@ -826,18 +826,18 @@ impl Window<'_> {
     }
 }
 
-unsafe impl HasRawWindowHandle for Window<'_> {
-    fn raw_window_handle(&self) -> RawWindowHandle {
+impl HasWindowHandle for Window<'_> {
+    fn window_handle(&self) -> Result<raw_window_handle::WindowHandle<'_>, HandleError> {
         let mut handle = Win32WindowHandle::empty();
         handle.hwnd = self.state.hwnd as *mut c_void;
 
-        RawWindowHandle::Win32(handle)
+        Ok(raw_window_handle::WindowHandle::Win32(handle))
     }
 }
 
-unsafe impl HasRawDisplayHandle for Window<'_> {
-    fn raw_display_handle(&self) -> RawDisplayHandle {
-        RawDisplayHandle::Windows(WindowsDisplayHandle::empty())
+impl HasDisplayHandle for Window<'_> {
+    fn display_handle(&self) -> Result<raw_window_handle::DisplayHandle<'_>, HandleError> {
+        Ok(raw_window_handle::DisplayHandle::Windows(WindowsDisplayHandle::empty()))
     }
 }
 
